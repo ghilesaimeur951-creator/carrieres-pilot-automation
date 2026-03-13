@@ -49,14 +49,14 @@ app.post('/sessions', requireAuth, async (req, res) => {
   try {
     const browser = await chromium.launch({
       headless: true,
+      executablePath: process.env.CHROMIUM_EXECUTABLE_PATH || undefined,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-blink-features=AutomationControlled',
         '--window-size=1280,720',
-        '--disable-infobars',
-        '--disable-extensions',
         '--disable-dev-shm-usage',
+        '--disable-gpu',
       ],
     });
 
