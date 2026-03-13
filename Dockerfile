@@ -1,11 +1,9 @@
-FROM mcr.microsoft.com/playwright:v1.42.0-focal
+FROM node:20-bookworm-slim
 
 WORKDIR /app
 
-ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-
 COPY package*.json ./
-RUN npm ci
+RUN npm ci && npx playwright install chromium --with-deps
 
 COPY server.js .
 
