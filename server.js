@@ -1,28 +1,20 @@
-require('dotenv').config();
+﻿require('dotenv').config();
 const express = require('express');
 const { WebSocketServer } = require('ws');
 const http = require('http');
-const { chromium: chromiumExtra } = require('playwright-extra');
-const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-chromiumExtra.use(StealthPlugin());
 
 const app = express();
 app.use(express.json());
-
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-if (!process.env.AUTOMATION_SECRET) {
-  console.warn('WARNING: AUTOMATION_SECRET non configuree');
-}
+if (!process.env.AUTOMATION_SECRET) console.warn('WARNING: AUTOMATION_SECRET non configuree');
 
 const sessions = new Map();
 
 function requireAuth(req, res, next) {
   const secret = process.env.AUTOMATION_SECRET;
-  if (!secret || req.headers['x-automation-secret'] !== secret) {
-    return res.status(401).json({ error: 'Non autorise' });
-  }
+  if (!secret || req.headers['x-automation-secret'] !== secret) return res.status(401).json({ error: 'Non autorise' });
   next();
 }
 
@@ -34,63 +26,73 @@ app.post('/sessions', requireAuth, async (req, res) => {
   if (sessions.has(sessionId)) return res.status(409).json({ error: 'Session deja existante' });
   try {
     const { chromium } = require('playwright');
-    // Proxy résidentiel si configuré (contourne le blocage IP datacenter Cloudflare)
-    const proxyUrl = process.env.PROXY_URL; // ex: http://user:pass@host:port
-    const launchOpts = {
-      headless: false,  // Non-headless via Xvfb — contourne les checks GPU/WebGL/canvas de Cloudflare
+    const browser = await chromium.launch({
+      headless: true,
       args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
+        '--no-sandbox', '--disable-setuid-sandbox',
         '--disable-blink-features=AutomationControlled',
-        '--window-size=1280,720',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--disable-infobars',
-        '--no-first-run',
-        '--no-default-browser-check',
-        '--lang=fr-FR,fr',
-        '--disable-ipc-flooding-protection',
+        '--window-size=1280,720', '--disable-dev-shm-usage', '--disable-gpu',
+        '--disable-infobars', '--no-first-run', '--no-default-browser-check',
+        '--lang=fr-FR,fr', '--disable-ipc-flooding-protection',
       ],
-    };
-    const browser = await chromiumExtra.launch(launchOpts);
-    const contextOpts = {
+    });
+    const context = await browser.newContext({
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
       viewport: { width: 1280, height: 720 },
       locale: 'fr-FR',
       timezoneId: 'Europe/Paris',
-    };
-    if (proxyUrl) {
-      const u = new URL(proxyUrl);
-      contextOpts.proxy = {
-        server: `${u.protocol}//${u.hostname}:${u.port}`,
-        ...(u.username ? { username: decodeURIComponent(u.username), password: decodeURIComponent(u.password) } : {}),
-      };
-    }
-    const context = await browser.newContext(contextOpts);
+    });
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+      if (!window.chrome) {
+        window.chrome = {
+          app: { isInstalled: false },
+          runtime: {},
+          csi() {}, loadTimes() {},
+        };
+      }
+      const makeMime = (type, suffixes, desc) => { const m = Object.create(MimeType.prototype); Object.defineProperties(m, { type: { value: type }, suffixes: { value: suffixes }, description: { value: desc } }); return m; };
+      const makePlugin = (name, filename, desc, mimes) => { const p = Object.create(Plugin.prototype); Object.defineProperties(p, { name: { value: name }, filename: { value: filename }, description: { value: desc }, length: { value: mimes.length } }); mimes.forEach((m, i) => { p[i] = m; m.enabledPlugin = p; }); p.item = (i) => p[i]; p.namedItem = (t) => mimes.find(m => m.type === t) || null; return p; };
+      const plugins = [
+        makePlugin('Chrome PDF Plugin', 'internal-pdf-viewer', 'Portable Document Format', [makeMime('application/x-google-chrome-pdf', 'pdf', 'Portable Document Format')]),
+        makePlugin('Chrome PDF Viewer', 'mhjfbmdgcfjbbpaeojofohoefgiehjai', '', [makeMime('application/pdf', 'pdf', '')]),
+        makePlugin('Native Client', 'internal-nacl-plugin', '', [makeMime('application/x-nacl', '', 'Native Client Executable'), makeMime('application/x-pnacl', '', 'Portable Native Client Executable')]),
+      ];
+      const pluginArr = Object.create(PluginArray.prototype);
+      plugins.forEach((p, i) => { pluginArr[i] = p; });
+      Object.defineProperty(pluginArr, 'length', { value: plugins.length });
+      pluginArr.item = (i) => pluginArr[i]; pluginArr.namedItem = (n) => plugins.find(p => p.name === n) || null; pluginArr.refresh = () => {};
+      Object.defineProperty(navigator, 'plugins', { get: () => pluginArr });
+      const allMimes = plugins.flatMap(p => Array.from({ length: p.length }, (_, i) => p[i]));
+      const mimeArr = Object.create(MimeTypeArray.prototype);
+      allMimes.forEach((m, i) => { mimeArr[i] = m; });
+      Object.defineProperty(mimeArr, 'length', { value: allMimes.length });
+      mimeArr.item = (i) => mimeArr[i]; mimeArr.namedItem = (t) => allMimes.find(m => m.type === t) || null;
+      Object.defineProperty(navigator, 'mimeTypes', { get: () => mimeArr });
+      Object.defineProperty(navigator, 'languages', { get: () => ['fr-FR', 'fr', 'en-US', 'en'] });
+      Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 4 });
+      Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+      if (navigator.permissions && navigator.permissions.query) {
+        const orig = navigator.permissions.query.bind(navigator.permissions);
+        navigator.permissions.query = (params) => params.name === 'notifications' ? Promise.resolve({ state: 'default', onchange: null }) : orig(params);
+      }
+    });
     const page = await context.newPage();
     await page.goto(initialUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
     const sessionObj = { browser, context, page, createdAt: Date.now() };
     sessions.set(sessionId, sessionObj);
-
-    // Suivre les popups (Google OAuth, etc.) — switcher la page active sur la popup
+    // Suivre les popups (Google OAuth, etc.)
     context.on('page', async (newPage) => {
       try {
         await newPage.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
         sessionObj.page = newPage;
-        console.log('[sessions] Popup ouverte, switch vers:', newPage.url());
-        // Quand la popup se ferme, revenir à la page principale
+        console.log('[sessions] Popup ouverte:', newPage.url());
         newPage.on('close', () => {
           const pages = context.pages();
-          if (pages.length > 0) {
-            sessionObj.page = pages[pages.length - 1];
-            console.log('[sessions] Popup fermee, retour vers:', sessionObj.page.url());
-          }
+          if (pages.length > 0) { sessionObj.page = pages[pages.length - 1]; console.log('[sessions] Popup fermee, retour:', sessionObj.page.url()); }
         });
-      } catch (e) {
-        console.error('[sessions] Popup error:', e.message);
-      }
+      } catch (e) { console.error('[sessions] Popup error:', e.message); }
     });
-
     console.log('[sessions] Creee:', sessionId);
     res.json({ success: true, sessionId });
   } catch (e) {
@@ -106,9 +108,7 @@ app.post('/sessions/:id/cookies', requireAuth, async (req, res) => {
     const currentUrl = session.page.url();
     const cookies = await session.context.cookies();
     res.json({ success: true, cookies, currentUrl });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.delete('/sessions/:id', requireAuth, async (req, res) => {
@@ -118,18 +118,13 @@ app.delete('/sessions/:id', requireAuth, async (req, res) => {
     await session.browser.close();
     sessions.delete(req.params.id);
     res.json({ success: true });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 setInterval(() => {
   const now = Date.now();
   for (const [id, s] of sessions.entries()) {
-    if (now - s.createdAt > 10 * 60 * 1000) {
-      s.browser.close().catch(() => {});
-      sessions.delete(id);
-    }
+    if (now - s.createdAt > 10 * 60 * 1000) { s.browser.close().catch(() => {}); sessions.delete(id); }
   }
 }, 60 * 1000);
 
@@ -137,8 +132,7 @@ wss.on('connection', (ws, req) => {
   const url = new URL(req.url, 'http://localhost');
   const sessionId = url.searchParams.get('sessionId');
   const secret = url.searchParams.get('secret');
-  const wsSecret = process.env.AUTOMATION_SECRET;
-  if (!wsSecret || secret !== wsSecret) { ws.close(1008, 'Non autorise'); return; }
+  if (!process.env.AUTOMATION_SECRET || secret !== process.env.AUTOMATION_SECRET) { ws.close(1008, 'Non autorise'); return; }
   const session = sessions.get(sessionId);
   if (!session) { ws.close(1008, 'Session non trouvee'); return; }
   const interval = setInterval(async () => {
@@ -159,6 +153,5 @@ wss.on('connection', (ws, req) => {
 });
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
-console.log('[startup] PORT=' + PORT);
 server.listen(PORT, '0.0.0.0', () => console.log('[startup] Listening on 0.0.0.0:' + PORT));
 server.on('error', (e) => { console.error('[startup] ERROR:', e.message); process.exit(1); });
