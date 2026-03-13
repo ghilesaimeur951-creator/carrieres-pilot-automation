@@ -1,17 +1,15 @@
-FROM node:20-slim
+FROM node:20-bookworm-slim
 
-# Installer Chromium et ses dependances systeme
+# Dependances systeme pour Chromium
 RUN apt-get update && apt-get install -y \
     chromium \
-    fonts-ipafont-gothic \
-    fonts-wqy-zenhei \
+    ca-certificates \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY package*.json ./
 
-# Ne pas telecharger le navigateur Playwright (on utilise Chromium systeme)
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 RUN npm ci
 
