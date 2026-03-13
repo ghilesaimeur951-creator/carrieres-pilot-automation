@@ -1,13 +1,5 @@
-# node:20-bookworm (Debian 12, image complète avec toutes les dépendances système)
+# Diagnostic: node:20-bookworm sans chromium pour tester si Railway deploie
 FROM node:20-bookworm
-
-RUN apt-get update && apt-get install -y \
-    chromium \
-    fonts-ipafont-gothic \
-    fonts-wqy-zenhei \
-    ca-certificates \
-    --no-install-recommends \
-    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY package*.json ./
@@ -18,7 +10,5 @@ RUN npm ci
 COPY . .
 
 ENV PORT=3001
-ENV CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
-
 EXPOSE 3001
 CMD ["node", "server.js"]
