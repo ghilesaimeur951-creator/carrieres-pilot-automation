@@ -18,8 +18,7 @@ const wss = new WebSocketServer({ server });
 
 const AUTH_SECRET = process.env.AUTOMATION_SECRET;
 if (!AUTH_SECRET) {
-  console.error('FATAL: AUTOMATION_SECRET manquante');
-  process.exit(1);
+  console.warn('WARNING: AUTOMATION_SECRET non configurée — toutes les requêtes authentifiées seront rejetées');
 }
 
 // Sessions actives : sessionId → { browser, context, page, createdAt }
@@ -27,7 +26,8 @@ const sessions = new Map();
 
 // ── Middleware auth ────────────────────────────────────────────────────────────
 function requireAuth(req, res, next) {
-  if (req.headers['x-automation-secret'] !== AUTH_SECRET) {
+  const secret = process.env.AUTOMATION_SECRET;
+  if (!secret || req.headers['x-automation-secret'] !== secret) {
     return res.status(401).json({ error: 'Non autorisé' });
   }
   next();
@@ -131,7 +131,8 @@ wss.on('connection', (ws, req) => {
   const sessionId = url.searchParams.get('sessionId');
   const secret = url.searchParams.get('secret');
 
-  if (secret !== AUTH_SECRET) {
+  const wsSecret = process.env.AUTOMATION_SECRET;
+  if (!wsSecret || secret !== wsSecret) {
     ws.close(1008, 'Non autorisé');
     return;
   }

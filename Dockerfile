@@ -1,12 +1,13 @@
-FROM node:20-alpine
+# node:20-bookworm (Debian 12, image complète avec toutes les dépendances système)
+FROM node:20-bookworm
 
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y \
     chromium \
-    nss \
-    freetype \
-    harfbuzz \
+    fonts-ipafont-gothic \
+    fonts-wqy-zenhei \
     ca-certificates \
-    ttf-freefont
+    --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY package*.json ./
@@ -17,7 +18,7 @@ RUN npm ci
 COPY . .
 
 ENV PORT=3001
-ENV CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium-browser
+ENV CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
 EXPOSE 3001
 CMD ["node", "server.js"]
