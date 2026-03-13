@@ -20,6 +20,76 @@ function requireAuth(req, res, next) {
 
 app.get('/health', (_req, res) => res.json({ ok: true, sessions: sessions.size }));
 
+// Résolution automatique Cloudflare Turnstile via 2captcha
+async function autoSolveTurnstile(page) {
+  const apiKey = process.env.TWOCAPTCHA_API_KEY;
+  if (!apiKey) return { solved: false, reason: 'no_api_key' };
+  try {
+    // Chercher le widget Turnstile sur la page courante
+    const sitekey = await page.evaluate(() => {
+      const el = document.querySelector('[data-sitekey], iframe[src*="challenges.cloudflare.com"], iframe[src*="turnstile"]');
+      if (!el) return null;
+      if (el.getAttribute('data-sitekey')) return el.getAttribute('data-sitekey');
+      // Extraire le sitekey depuis l'URL de l'iframe
+      const src = el.getAttribute('src') || '';
+      const m = src.match(/[?&]sitekey=([^&]+)/);
+      return m ? m[1] : null;
+    }).catch(() => null);
+    if (!sitekey) return { solved: false, reason: 'no_turnstile_found' };
+
+    const pageUrl = page.url();
+    console.log('[captcha] Turnstile sitekey:', sitekey, 'url:', pageUrl);
+
+    // Créer la tâche 2captcha
+    const createRes = await fetch('https://api.2captcha.com/createTask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        clientKey: apiKey,
+        task: { type: 'TurnstileTaskProxyless', websiteURL: pageUrl, websiteKey: sitekey },
+      }),
+    });
+    const { taskId, errorId, errorCode } = await createRes.json();
+    if (errorId) { console.error('[captcha] Create error:', errorCode); return { solved: false, reason: errorCode }; }
+    console.log('[captcha] Task created:', taskId);
+
+    // Attendre la solution (max 2min)
+    for (let i = 0; i < 24; i++) {
+      await new Promise(r => setTimeout(r, 5000));
+      const res = await fetch('https://api.2captcha.com/getTaskResult', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientKey: apiKey, taskId }),
+      });
+      const result = await res.json();
+      if (result.status === 'ready') {
+        const token = result.solution.token;
+        // Injecter le token dans la page
+        await page.evaluate((t) => {
+          document.querySelectorAll('[name="cf-turnstile-response"], [name="g-recaptcha-response"]').forEach(el => { el.value = t; });
+          if (typeof window.cfCallback === 'function') window.cfCallback(t);
+          if (typeof window.turnstileCallback === 'function') window.turnstileCallback(t);
+          // Chercher et appeler le callback Turnstile enregistré
+          const iframes = document.querySelectorAll('iframe[src*="turnstile"], iframe[src*="challenges.cloudflare"]');
+          iframes.forEach(iframe => {
+            try {
+              const cfInput = iframe.closest('form')?.querySelector('[name="cf-turnstile-response"]');
+              if (cfInput) cfInput.value = t;
+            } catch {}
+          });
+        }, token);
+        console.log('[captcha] ✅ Turnstile solved');
+        return { solved: true, token };
+      }
+      if (result.errorId) { console.error('[captcha] Poll error:', result.errorCode); return { solved: false, reason: result.errorCode }; }
+    }
+    return { solved: false, reason: 'timeout' };
+  } catch (e) {
+    console.error('[captcha] Exception:', e.message);
+    return { solved: false, reason: e.message };
+  }
+}
+
 app.post('/sessions', requireAuth, async (req, res) => {
   const { sessionId, initialUrl } = req.body;
   if (!sessionId || !initialUrl) return res.status(400).json({ error: 'sessionId et initialUrl requis' });
@@ -81,6 +151,8 @@ app.post('/sessions', requireAuth, async (req, res) => {
     await page.goto(initialUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
     const sessionObj = { browser, context, page, createdAt: Date.now() };
     sessions.set(sessionId, sessionObj);
+    // Auto-solve Turnstile si 2captcha configuré
+    autoSolveTurnstile(page).then(r => { if (r.solved) console.log('[captcha] Auto-solved on load'); }).catch(() => {});
     // Suivre les popups (Google OAuth, etc.)
     context.on('page', async (newPage) => {
       try {
@@ -109,6 +181,15 @@ app.post('/sessions/:id/cookies', requireAuth, async (req, res) => {
     const cookies = await session.context.cookies();
     res.json({ success: true, cookies, currentUrl });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Endpoint pour résoudre manuellement un CAPTCHA Turnstile sur la session active
+app.post('/sessions/:id/solve-captcha', requireAuth, async (req, res) => {
+  const session = sessions.get(req.params.id);
+  if (!session) return res.status(404).json({ error: 'Session non trouvee' });
+  const result = await autoSolveTurnstile(session.page);
+  if (result.solved) return res.json({ success: true });
+  res.status(result.reason === 'no_api_key' ? 503 : 500).json({ success: false, reason: result.reason });
 });
 
 app.delete('/sessions/:id', requireAuth, async (req, res) => {
