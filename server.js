@@ -2,6 +2,9 @@ require('dotenv').config();
 const express = require('express');
 const { WebSocketServer } = require('ws');
 const http = require('http');
+const { chromium: chromiumExtra } = require('playwright-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+chromiumExtra.use(StealthPlugin());
 
 const app = express();
 app.use(express.json());
@@ -31,7 +34,9 @@ app.post('/sessions', requireAuth, async (req, res) => {
   if (sessions.has(sessionId)) return res.status(409).json({ error: 'Session deja existante' });
   try {
     const { chromium } = require('playwright');
-    const browser = await chromium.launch({
+    // Proxy résidentiel si configuré (contourne le blocage IP datacenter Cloudflare)
+    const proxyUrl = process.env.PROXY_URL; // ex: http://user:pass@host:port
+    const launchOpts = {
       headless: true,
       args: [
         '--no-sandbox',
@@ -46,74 +51,22 @@ app.post('/sessions', requireAuth, async (req, res) => {
         '--lang=fr-FR,fr',
         '--disable-ipc-flooding-protection',
       ],
-    });
-    const context = await browser.newContext({
+    };
+    const browser = await chromiumExtra.launch(launchOpts);
+    const contextOpts = {
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
       viewport: { width: 1280, height: 720 },
       locale: 'fr-FR',
       timezoneId: 'Europe/Paris',
-    });
-    await context.addInitScript(() => {
-      // 1. Remove webdriver
-      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-
-      // 2. Add window.chrome (absent en headless — détecté par Cloudflare)
-      if (!window.chrome) {
-        window.chrome = {
-          app: { isInstalled: false, InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' }, RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' } },
-          runtime: { OnInstalledReason: { CHROME_UPDATE: 'chrome_update', INSTALL: 'install', UPDATE: 'update' }, PlatformArch: { X86_64: 'x86-64', ARM: 'arm' } },
-          csi() {}, loadTimes() {},
-        };
-      }
-
-      // 3. Fake plugins (vide en headless — détecté par Cloudflare)
-      const makeMime = (type, suffixes, desc) => {
-        const m = Object.create(MimeType.prototype);
-        Object.defineProperties(m, { type: { value: type }, suffixes: { value: suffixes }, description: { value: desc } });
-        return m;
+    };
+    if (proxyUrl) {
+      const u = new URL(proxyUrl);
+      contextOpts.proxy = {
+        server: `${u.protocol}//${u.hostname}:${u.port}`,
+        ...(u.username ? { username: decodeURIComponent(u.username), password: decodeURIComponent(u.password) } : {}),
       };
-      const makePlugin = (name, filename, desc, mimes) => {
-        const p = Object.create(Plugin.prototype);
-        Object.defineProperties(p, { name: { value: name }, filename: { value: filename }, description: { value: desc }, length: { value: mimes.length } });
-        mimes.forEach((m, i) => { p[i] = m; m.enabledPlugin = p; });
-        p.item = (i) => p[i]; p.namedItem = (t) => mimes.find(m => m.type === t) || null;
-        return p;
-      };
-      const plugins = [
-        makePlugin('Chrome PDF Plugin', 'internal-pdf-viewer', 'Portable Document Format', [makeMime('application/x-google-chrome-pdf', 'pdf', 'Portable Document Format')]),
-        makePlugin('Chrome PDF Viewer', 'mhjfbmdgcfjbbpaeojofohoefgiehjai', '', [makeMime('application/pdf', 'pdf', '')]),
-        makePlugin('Native Client', 'internal-nacl-plugin', '', [makeMime('application/x-nacl', '', 'Native Client Executable'), makeMime('application/x-pnacl', '', 'Portable Native Client Executable')]),
-      ];
-      const pluginArr = Object.create(PluginArray.prototype);
-      plugins.forEach((p, i) => { pluginArr[i] = p; });
-      Object.defineProperty(pluginArr, 'length', { value: plugins.length });
-      pluginArr.item = (i) => pluginArr[i]; pluginArr.namedItem = (n) => plugins.find(p => p.name === n) || null; pluginArr.refresh = () => {};
-      Object.defineProperty(navigator, 'plugins', { get: () => pluginArr });
-
-      // 4. Fake mimeTypes
-      const allMimes = plugins.flatMap(p => Array.from({ length: p.length }, (_, i) => p[i]));
-      const mimeArr = Object.create(MimeTypeArray.prototype);
-      allMimes.forEach((m, i) => { mimeArr[i] = m; });
-      Object.defineProperty(mimeArr, 'length', { value: allMimes.length });
-      mimeArr.item = (i) => mimeArr[i]; mimeArr.namedItem = (t) => allMimes.find(m => m.type === t) || null;
-      Object.defineProperty(navigator, 'mimeTypes', { get: () => mimeArr });
-
-      // 5. Fix languages
-      Object.defineProperty(navigator, 'languages', { get: () => ['fr-FR', 'fr', 'en-US', 'en'] });
-
-      // 6. Fix permissions (Cloudflare vérifie le comportement notifications)
-      if (navigator.permissions && navigator.permissions.query) {
-        const orig = navigator.permissions.query.bind(navigator.permissions);
-        navigator.permissions.query = (params) =>
-          params.name === 'notifications'
-            ? Promise.resolve({ state: 'default', onchange: null })
-            : orig(params);
-      }
-
-      // 7. Fix hardware concurrency
-      Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 4 });
-      Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
-    });
+    }
+    const context = await browser.newContext(contextOpts);
     const page = await context.newPage();
     await page.goto(initialUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
     const sessionObj = { browser, context, page, createdAt: Date.now() };
