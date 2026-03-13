@@ -37,7 +37,7 @@ app.post('/sessions', requireAuth, async (req, res) => {
     // Proxy résidentiel si configuré (contourne le blocage IP datacenter Cloudflare)
     const proxyUrl = process.env.PROXY_URL; // ex: http://user:pass@host:port
     const launchOpts = {
-      headless: true,
+      headless: false,  // Non-headless via Xvfb — contourne les checks GPU/WebGL/canvas de Cloudflare
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
