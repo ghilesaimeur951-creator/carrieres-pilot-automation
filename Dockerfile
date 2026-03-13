@@ -1,15 +1,8 @@
-FROM ubuntu:22.04
-
-ENV DEBIAN_FRONTEND=noninteractive
+# node:20-bookworm = Debian 12 (chromium disponible comme vrai .deb, pas snap)
+FROM node:20-bookworm
 
 RUN apt-get update && apt-get install -y \
-    curl \
-    ca-certificates \
-    --no-install-recommends \
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs \
-    && apt-get install -y \
-    chromium-browser \
+    chromium \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
@@ -22,7 +15,7 @@ RUN npm ci
 COPY . .
 
 ENV PORT=3001
-ENV CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium-browser
+ENV CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
 EXPOSE 3001
 CMD ["node", "server.js"]
