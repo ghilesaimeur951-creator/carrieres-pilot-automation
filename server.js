@@ -116,7 +116,28 @@ app.post('/sessions', requireAuth, async (req, res) => {
     });
     const page = await context.newPage();
     await page.goto(initialUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    sessions.set(sessionId, { browser, context, page, createdAt: Date.now() });
+    const sessionObj = { browser, context, page, createdAt: Date.now() };
+    sessions.set(sessionId, sessionObj);
+
+    // Suivre les popups (Google OAuth, etc.) — switcher la page active sur la popup
+    context.on('page', async (newPage) => {
+      try {
+        await newPage.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
+        sessionObj.page = newPage;
+        console.log('[sessions] Popup ouverte, switch vers:', newPage.url());
+        // Quand la popup se ferme, revenir à la page principale
+        newPage.on('close', () => {
+          const pages = context.pages();
+          if (pages.length > 0) {
+            sessionObj.page = pages[pages.length - 1];
+            console.log('[sessions] Popup fermee, retour vers:', sessionObj.page.url());
+          }
+        });
+      } catch (e) {
+        console.error('[sessions] Popup error:', e.message);
+      }
+    });
+
     console.log('[sessions] Creee:', sessionId);
     res.json({ success: true, sessionId });
   } catch (e) {
