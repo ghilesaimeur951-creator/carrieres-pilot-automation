@@ -14,5 +14,4 @@ COPY . .
 ENV PORT=3001
 EXPOSE 3001
 
-# xvfb-run démarre un écran virtuel (nécessaire pour headless=false)
-CMD ["xvfb-run", "--server-args=-screen 0 1280x720x24 -ac", "node", "server.js"]
+CMD ["node", "server.js"]

@@ -48,7 +48,7 @@ app.post('/sessions', requireAuth, async (req, res) => {
 
   try {
     const browser = await chromium.launch({
-      headless: false,
+      headless: true,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -56,6 +56,7 @@ app.post('/sessions', requireAuth, async (req, res) => {
         '--window-size=1280,720',
         '--disable-infobars',
         '--disable-extensions',
+        '--disable-dev-shm-usage',
       ],
     });
 
