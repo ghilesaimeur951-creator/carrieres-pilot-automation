@@ -189,6 +189,7 @@ app.post('/sessions/:id/solve-captcha', requireAuth, async (req, res) => {
   if (!session) return res.status(404).json({ error: 'Session non trouvee' });
   const result = await autoSolveTurnstile(session.page);
   if (result.solved) return res.json({ success: true });
+  if (result.reason === 'no_turnstile_found') return res.json({ success: false, reason: 'no_turnstile_found' });
   res.status(result.reason === 'no_api_key' ? 503 : 500).json({ success: false, reason: result.reason });
 });
 
