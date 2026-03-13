@@ -7,7 +7,7 @@
 require('dotenv').config();
 const express = require('express');
 const { WebSocketServer } = require('ws');
-const { chromium } = require('playwright-core');
+const { chromium } = require('playwright');
 const http = require('http');
 
 const app = express();
@@ -49,7 +49,6 @@ app.post('/sessions', requireAuth, async (req, res) => {
   try {
     const browser = await chromium.launch({
       headless: true,
-      executablePath: process.env.CHROMIUM_EXECUTABLE_PATH || undefined,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',

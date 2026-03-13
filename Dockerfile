@@ -1,14 +1,11 @@
-# Diagnostic: node:20-bookworm sans chromium pour tester si Railway deploie
+# Pas utilisé (nixpacks actif via railway.toml)
+# kept for reference
 FROM node:20-bookworm
-
 WORKDIR /app
 COPY package*.json ./
-
-ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-RUN npm ci
-
+RUN npm ci && npx playwright install --with-deps chromium
 COPY . .
-
 ENV PORT=3001
 EXPOSE 3001
 CMD ["node", "server.js"]
+
