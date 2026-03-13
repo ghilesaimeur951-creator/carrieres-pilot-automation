@@ -1,12 +1,5 @@
-FROM mcr.microsoft.com/playwright:v1.42.0-focal
-
+FROM node:20-alpine
 WORKDIR /app
-
-COPY package*.json ./
-ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=0
-RUN npm ci
-
-COPY . .
-
+COPY server.js .
 CMD ["node", "server.js"]
 
