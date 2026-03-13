@@ -1,10 +1,12 @@
-# node:20-bookworm = Debian 12 (chromium disponible comme vrai .deb, pas snap)
-FROM node:20-bookworm
+FROM node:20-alpine
 
-RUN apt-get update && apt-get install -y \
+RUN apk add --no-cache \
     chromium \
-    --no-install-recommends \
-    && rm -rf /var/lib/apt/lists/*
+    nss \
+    freetype \
+    harfbuzz \
+    ca-certificates \
+    ttf-freefont
 
 WORKDIR /app
 COPY package*.json ./
@@ -15,7 +17,7 @@ RUN npm ci
 COPY . .
 
 ENV PORT=3001
-ENV CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
+ENV CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
 EXPOSE 3001
 CMD ["node", "server.js"]
