@@ -174,5 +174,5 @@ wss.on('connection', (ws, req) => {
   });
 });
 
-const PORT = process.env.PORT ?? 3001;
-server.listen(PORT, () => console.log(`Automation server démarré sur le port ${PORT}`));
+const PORT = parseInt(process.env.PORT ?? '3001', 10);
+server.listen(PORT, '0.0.0.0', () => console.log(`Automation server démarré sur le port ${PORT}`));
