@@ -25,15 +25,44 @@ async function autoSolveTurnstile(page) {
   const apiKey = process.env.TWOCAPTCHA_API_KEY;
   if (!apiKey) return { solved: false, reason: 'no_api_key' };
   try {
-    // Chercher le widget Turnstile sur la page courante
+    // Attendre que le widget Turnstile soit rendu (SPAs Angular/React)
+    await page.waitForTimeout(2000).catch(() => {});
+
+    // Chercher le widget Turnstile sur la page courante — stratégies multiples
     const sitekey = await page.evaluate(() => {
-      const el = document.querySelector('[data-sitekey], iframe[src*="challenges.cloudflare.com"], iframe[src*="turnstile"]');
-      if (!el) return null;
-      if (el.getAttribute('data-sitekey')) return el.getAttribute('data-sitekey');
-      // Extraire le sitekey depuis l'URL de l'iframe
-      const src = el.getAttribute('src') || '';
-      const m = src.match(/[?&]sitekey=([^&]+)/);
-      return m ? m[1] : null;
+      // 1. Attribut data-sitekey direct (div.cf-turnstile ou tout élément)
+      const bySitekey = document.querySelector('[data-sitekey]');
+      if (bySitekey) return bySitekey.getAttribute('data-sitekey');
+
+      // 2. Classe cf-turnstile (widget non encore rendu mais présent dans le DOM)
+      const byClass = document.querySelector('.cf-turnstile, [class*="cf-turnstile"], [id*="cf-chl"]');
+      if (byClass) {
+        const sk = byClass.getAttribute('data-sitekey') || byClass.getAttribute('data-cf-turnstile-sitekey');
+        if (sk) return sk;
+      }
+
+      // 3. iframe Cloudflare Turnstile (challenges.cloudflare.com)
+      const iframes = document.querySelectorAll('iframe');
+      for (const iframe of iframes) {
+        const src = iframe.getAttribute('src') || '';
+        if (src.includes('challenges.cloudflare.com') || src.includes('turnstile') || src.includes('cf-chl')) {
+          // Extraire le sitekey depuis l'URL de l'iframe
+          const m = src.match(/[?&]sitekey=([^&]+)/);
+          if (m) return decodeURIComponent(m[1]);
+          // Parfois le sitekey est dans le param k=
+          const k = src.match(/[?&]k=([^&]+)/);
+          if (k) return decodeURIComponent(k[1]);
+        }
+      }
+
+      // 4. Chercher dans les scripts inline (window.turnstile.render ou data-sitekey dans JSON)
+      const scripts = document.querySelectorAll('script:not([src])');
+      for (const s of scripts) {
+        const m = s.textContent.match(/['"](0x[0-9a-fA-F]{16,})['"]/);
+        if (m) return m[1]; // sitekeys Turnstile commencent souvent par 0x
+      }
+
+      return null;
     }).catch(() => null);
     if (!sitekey) return { solved: false, reason: 'no_turnstile_found' };
 
