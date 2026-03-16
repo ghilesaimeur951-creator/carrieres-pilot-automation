@@ -25,6 +25,32 @@ async function autoSolveTurnstile(page) {
   const apiKey = process.env.TWOCAPTCHA_API_KEY;
   if (!apiKey) return { solved: false, reason: 'no_api_key' };
   try {
+
+        await page.waitForLoadState('domcontentloaded').catch(() => {});
+    await new Promise(r => setTimeout(r, 2000));
+
+    // === DEBUG COMPLET — À RETIRER APRÈS ===
+    console.log('[DEBUG] URL:', page.url());
+    console.log('[DEBUG] Frames count:', page.frames().length);
+    page.frames().forEach((f, i) => console.log(`[DEBUG] Frame ${i}:`, f.url()));
+
+    const html = await page.content().catch(() => '');
+    console.log('[DEBUG] HTML[:3000]:', html.substring(0, 3000));
+
+    const allMatches = [...html.matchAll(/0x[0-9a-fA-F]{10,}/g)];
+    console.log('[DEBUG] Tous les hex trouvés:', allMatches.map(m => m[0]));
+
+    for (const frame of page.frames()) {
+      try {
+        const cfVars = await frame.evaluate(() => ({
+          chlOpt: window._cf_chl_opt,
+          chlCtx: window._cf_chl_ctx,
+          keys: Object.keys(window).filter(k => k.includes('cf') || k.includes('CF') || k.includes('turnstile'))
+        }));
+        console.log(`[DEBUG] Frame ${frame.url()} CF vars:`, JSON.stringify(cfVars));
+      } catch(e) {}
+    }
+    // === FIN DEBUG ===
     // Attendre que le widget Turnstile soit rendu (SPAs Angular/React)
     await page.waitForTimeout(2000).catch(() => {});
 
